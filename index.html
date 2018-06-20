@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>KY Fires 2010-2013</title>
+  <meta name="viewport" content="initial-scale=1.0">
+  <meta charset="utf-8">
+
+  <link href="http://fonts.googleapis.com/css?family=Montserrat" rel="stylesheet" type="text/css">
+  <style>
+    body {
+      padding: 0;
+      margin: 0;
+      background: whitesmoke;
+      font-family: Montserrat, serif;
+    }
+
+    header,
+    footer {
+      background: #245574;
+      color: white;
+      padding: 18px 0;
+      box-shadow: 0px 1px 3px #245574;
+    }
+
+    .container {
+      width: 960px;
+      margin: 18px auto;
+    }
+
+    h1 {
+      width: 960px;
+      margin: 0 auto;
+      font-size: 2em;
+    }
+
+    a {
+      color: white;
+    }
+
+    ul li {
+      margin: 0 0 8px 0;
+    }
+
+    #map {
+      width: 100%;
+      height: 600px;
+    }
+
+    .county {
+      fill: #468fa6;
+      stroke: whitesmoke;
+    }
+
+    .hover {
+      stroke: #fe955f;
+      stroke-width: 2;
+    }
+
+    .tooltip {
+      position: absolute;
+      min-width: 60px;
+      min-height: 28px;
+      padding: 6px 12px 3px;
+      color: whitesmoke;
+      background: #245574;
+      border-radius: 2px;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .fire {
+      fill: #cf5635;
+      stroke: white;
+      stroke-width: .3;
+      opacity: .8;
+    }
+
+    .legend circle {
+      fill: none;
+      stroke: #3b3a3a;
+      stroke-width: .5;
+    }
+
+    .legend text {
+      fill: #777;
+      font: 10px sans-serif;
+      text-anchor: middle;
+    }
+
+    .filter {
+      position: absolute;
+      right: 48px;
+      width: 260px;
+      font-size: 1.3em;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Kentucky Fires 2010 - 2013</h1>
+  </header>
+  <div class="container">
+    <div id="map"></div>
+  </div>
+  <footer>
+    <div class="container">
+      <ul>
+        <li>Map authored by James Coil</li>
+        <li>Data sourced from <a href="https://www.fs.usda.gov/rds/archive/Product/RDS-2013-0009.4/">USDA Forest Service</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script src="https://d3js.org/d3.v5.js"></script>
+  <script src="https://unpkg.com/topojson@3"></script>
+  <script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+  <script>
+    // synchronous calls to data files
+    var kyCountiesJson = d3.json("data/ky_counties.json")
+    firesCSV = d3.csv("data/ky_big_fires_10_13.csv")
+
+    var radius = d3.scaleSqrt().domain([0, 1000]).range([1, 20])
+
+    // define color generator
+    var color = d3.scaleOrdinal(d3.schemeDark2)
+
+    // use promise to call all data files, then send data to callback
+    Promise.all([kyCountiesJson, firesCSV]).then(drawMap, error)
+
+    function error(error) {
+      console.log(error)
+    }
+
+    function drawMap(data) {
+      // console.log(data)  // access to both datasets here
+
+      // data is array of our two datasets
+      var countiesData = data[0],
+        firesData = data[1]
+
+      // define width and height of our SVG
+      var width = 960,
+        height = 600
+
+      // select the map element
+      var svg = d3.select("#map")
+        .append("svg") // append a new SVG element
+        .attr("width", width) // give the SVS element a width attribute and value
+        .attr("height", height) // same for the height
+
+      // get the GeoJSON representation of the TopoJSON data
+      var geojson = topojson.feature(countiesData, {
+        type: "GeometryCollection",
+        geometries: countiesData.objects.ky_counties.geometries
+      })
+
+      // define a projection using the US Albers USA
+      // fit the extent of the GeoJSON data to specified
+      // width and height
+      var projection = d3.geoMercator()
+        .fitSize([width, height], geojson)
+
+
+
+      // define a path generator, which will use
+      // the specified projection
+      var path = d3.geoPath()
+        .projection(projection)
+
+      // create and append a new SVG g element to the SVG
+      var counties = svg.append("g")
+        .selectAll("path") // select all the paths (that don't exist yet)
+        .data(geojson.features) // use the GeoJSON data
+        .enter() // enter the selection
+        .append("path") // append new path elements for each data feature
+        .attr("d", path) // give each path a d attribute value
+        .attr("class", "county") // give each path a class of county
+
+
+      // Create  div for the tooltip and hide with opacity
+      var tooltip = d3.select("body").append("div")
+        .attr("class", "tooltip")
+
+      // select the map element
+      d3.select("#map")
+        .on("mousemove", function(event) { // when mouse moves over it
+          // update the position of the tooltip
+          tooltip.style("left", (d3.event.pageX + 10) + "px")
+            .style("top", (d3.event.pageY - 30) + "px");
+        })
+
+      var fires = svg.append("g")
+        .selectAll("circle")
+        .data(firesData.sort(function(a, b) {
+          return b.Total - a.Total // place the large ones on the bottom
+        }))
+        .enter().append("circle") // enter and append a circle element
+        .attr("cx", function(d) { // define the x position
+          d.position = projection([d.LONGITUDE, d.LATITUDE]);
+          return d.position[0];
+        })
+        .attr("cy", function(d) {
+          return d.position[1];
+        })
+        .attr("r", function(d) {
+          return radius(+d.FIRE_SIZE)
+        })
+        .attr("class", "fire")
+        .style("fill", function(d) { // give each fire a fill style
+          return color(d.FIRE_SIZE) // derive the hex color from the value
+        })
+        .on("mouseover", function(d) { // when mousing over an element
+          d3.select(this).classed("hover", true); // select it, add a class name, and bring to front
+          tooltip.style("opacity", 1).html("Fire name : " + d.FIRE_NAME + "<br>" +
+            "County: " + d.FIPS_NAME +  "<br>" +
+            "Size: " + d.FIRE_SIZE + " Acres") // make tooltip visible and update info
+        })
+        .on("mouseout", function() { // when mousing out of an element
+          d3.select(this).classed("hover", false) // remove the class
+          tooltip.style("opacity", 0) // hide the element
+        })
+
+      drawLegend(svg, width, height)
+
+      addFilter(firesData, fires)
+    }
+
+    function drawLegend(svg, width, height) {
+
+      // append a new g element
+      var legend = svg.append("g")
+        .attr("dy", "1.3em") // adjust the vertical displacement
+        .attr("class", "legend") // add a class (for CSS)
+        .attr("transform", "translate(" + (width - 50) + "," + (height - 20) + ")")
+        .selectAll("g") // select all new g elements
+        .data([100, 1500]) // apply two numbers (approx median/max)
+        .enter().append("g"); // enter and append the two new g elements
+
+      // place the circles vertically and apply radius
+      legend.append("circle")
+        .attr("cy", function(d) {
+          return -radius(d);
+        })
+        .attr("r", radius);
+
+      // append text to each
+      legend.append("text")
+        .attr("y", function(d) {
+          return -2 * radius(d);
+        })
+        .attr("dy", "1.3em")
+        .text(d3.format(".1s"));
+
+      // append a legend label at bottom
+      legend.append("text")
+        .attr("y", 16)
+        .text("Acres")
+
+    } // end drawLegend()
+
+    function addFilter(firesData, fires) {
+
+      // select the map element
+      var dropdown = d3.select('#map')
+        .append('select') // append a new select element
+        .attr('class', 'filter') // add a class name
+        .on('change', onchange) // listen for change
+
+      // array to hold select options
+      var uniqueTypes = ["All Causes"];
+
+      // loop through all features and push unique types to array
+      firesData.forEach(function(fire) {
+        // if the type is not included in the array, push it to the array
+        if (!uniqueTypes.includes(fire.STAT_CAUSE_DESCR)) uniqueTypes.push(fire.STAT_CAUSE_DESCR)
+      })
+
+      // sort types alphabeticaly in array
+      uniqueTypes.sort();
+
+      // select all the options (that don't exist yet)
+      dropdown.selectAll('option')
+        .data(uniqueTypes).enter() // attach our array as data
+        .append("option") // append a new option element for each data item
+        .text(function(d) {
+          return d // use the item as text
+        })
+        .attr("value", function(d) {
+          return d // use the type as value attribute
+        })
+
+      function onchange() {
+        // get the current value from the select element
+        var val = d3.select('select').property('value')
+
+        // style the display of the facilities
+        fires.style("display", function(d) {
+          // if it's our default, show them all with inline
+          if (val === "All Causes") return "inline"
+          // otherwise, if each industry type doesn't match the value
+          if (d.STAT_CAUSE_DESCR != val) return "none" // don't display it
+        })
+      }
+
+    } // end addFilter function
+  </script>
+</body>
+
+</html>
